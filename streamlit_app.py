@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-import sqlite3
 import numpy as np
 
 # Set page config
@@ -28,18 +27,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Initialize database
-def init_db():
-    conn = sqlite3.connect('jc_index.db')
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS jc_measurements
-        (patient_id TEXT, scan_date DATE, jc_index REAL, 
-         total_lesions INTEGER, new_lesions INTEGER, 
-         notes TEXT, risk_level TEXT)
-    ''')
-    conn.commit()
-    conn.close()
+# Initialize session state for data storage
+if 'measurements' not in st.session_state:
+    st.session_state.measurements = {}
 
 # Calculate risk level
 def calculate_risk(jc_index):
@@ -49,36 +39,22 @@ def calculate_risk(jc_index):
         return "MEDIUM"
     return "LOW"
 
-# Save data to database
+# Save measurement
 def save_measurement(data):
-    conn = sqlite3.connect('jc_index.db')
-    c = conn.cursor()
-    c.execute('''
-        INSERT INTO jc_measurements 
-        (patient_id, scan_date, jc_index, total_lesions, new_lesions, notes, risk_level)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        data['patient_id'],
-        data['scan_date'],
-        data['jc_index'],
-        data['total_lesions'],
-        data['new_lesions'],
-        data['notes'],
-        calculate_risk(data['jc_index'])
-    ))
-    conn.commit()
-    conn.close()
+    if data['patient_id'] not in st.session_state.measurements:
+        st.session_state.measurements[data['patient_id']] = []
+    
+    data['risk_level'] = calculate_risk(data['jc_index'])
+    st.session_state.measurements[data['patient_id']].append(data)
 
-# Load data from database
+# Load measurements
 def load_measurements(patient_id):
-    conn = sqlite3.connect('jc_index.db')
-    query = f"SELECT * FROM jc_measurements WHERE patient_id = '{patient_id}' ORDER BY scan_date"
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
-
-# Initialize database
-init_db()
+    if patient_id not in st.session_state.measurements:
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(st.session_state.measurements[patient_id])
+    df['scan_date'] = pd.to_datetime(df['scan_date'])
+    return df.sort_values('scan_date')
 
 # Title and patient selection
 st.title("JC Index Monitoring System")
@@ -203,7 +179,7 @@ with st.form("measurement_form"):
             }
             save_measurement(new_data)
             st.success("✅ Measurement saved successfully!")
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("❌ Please enter valid measurements.")
 
